@@ -48,7 +48,7 @@ according to how your wiring is configured. Parameters labelled as "configurable
 // Include the libraries needed for DS18B20 temperature measurement from https://github.com/milesburton/Arduino-Temperature-Control-Library
 #include <DallasTemperature.h> 
 #include <WiFiManager.h>          //https://github.com/kentaylor/WiFiManager Must be this version.
-#include <SFE_BMP180.h>  // https://github.com/kentaylor/BMP180_Breakout_Arduino_Library  Must be this version.
+#include <BMP280.h>              //https://github.com/mahfuz195/BMP280_Arduino_Library
 /***************************
  * Begin Settings
  **************************/
@@ -125,8 +125,8 @@ SSD1306Ui ui     ( &display );
 DHT dht(DHTPIN, DHTTYPE);
 
 // Need to create an SFE_BMP180 object, here called "pressure":
-SFE_BMP180 pressure(SDA_PIN, SDC_PIN);
-#define ALTITUDE 587.0 // Yours. Altitude of belconnen in meters
+BMP280 bmp;
+#define ALTITUDE 8.0 // Yours. Altitude of belconnen in meters 
 
 TimeClient timeClient(UTC_OFFSET);
 
@@ -189,8 +189,13 @@ void setup() {
     WiFi.mode(WIFI_STA); // Force to station mode because if device was switched off while in access point mode it will start up next time in access point mode.
   }
   dht.begin();
-  if (pressure.begin()) //Start the pressure sensor
-    Serial.println("BMP180 init success");
+  //Start the pressure sensor
+  if(!bmp.begin(SDA_PIN,SDC_PIN)){
+        Serial.println("BMP init failed!");
+    while(1);
+  }
+  else Serial.println("BMP init success!");
+    bmp.setOversampling(4);
   // locate DS18B20 devices on the bus. 
   DS18B20sensors.begin();
   DS18B20sensors.setResolution(12);
@@ -641,19 +646,16 @@ void readSensors(){
     // Start a BMP temperature measurement:
     // If request is successful, the number of ms to wait is returned.
     // If request is unsuccessful, 0 is returned.
-    int statusBMP = pressure.startTemperature(); //will take 5ms
+    char statusBMP = bmp.startMeasurment(); //
     if (statusBMP != 0)
     {
       // Wait for the measurement to complete:
-      //Serial.print("startTemperature: ");
-      //Serial.println(statusBMP);
       delay(statusBMP);
-
       // Retrieve the completed temperature measurement:
       // Note that the measurement is stored in the variable temperatureBMP.
       // Function returns 1 if successful, 0 if failure.
-      double temperatureBMP;
-      statusBMP = pressure.getTemperature(temperatureBMP);
+      double temperatureBMP, PressureBMP;
+      statusBMP = bmp.getTemperatureAndPressure(temperatureBMP, PressureBMP); 
       if (statusBMP != 0){
           BMPtemperatureSensor.value  = temperatureBMP; 
           BMPtemperatureSensor.current = true;
@@ -663,41 +665,16 @@ void readSensors(){
         //Serial.print("temperatureBMP: ");
         //Serial.print(temperatureBMP,2);
         //Serial.print(" deg C, ");
-      
-        // Start a pressure measurement:
-        // The parameter is the oversampling setting, from 0 to 3 (highest res, longest wait).
-        // If request is successful, the number of ms to wait is returned.
-        // If request is unsuccessful, 0 is returned.
 
-        statusBMP = pressure.startPressure(3); //will take 26 ms
         if (statusBMP != 0){
-          // Wait for the measurement to complete:
-          //Serial.print("startPressure: ");
-          //Serial.print(statusBMP);
           delay(statusBMP);
-
-          // Retrieve the completed pressure measurement:
-          // Note that the measurement is stored in the variable P.
-          // Note also that the function requires the previous temperature measurement (T).
-          // (If temperature is stable, you can do one temperature measurement for a number of pressure measurements.)
-          // Function returns 1 if successful, 0 if failure.
-          double PressureBMP;
-          statusBMP = pressure.getPressure(PressureBMP, temperatureBMP);
-          if (statusBMP != 0){
-            // Print out the measurement:
-            //Serial.print(" absolute pressure: ");
-            //Serial.print(PressureBMP,2);
-            //Serial.print(" mb, ");
-            //Serial.print(PressureBMP*0.0295333727,2);
-            //Serial.println(" inHg");
-
             // The pressure sensor returns abolute pressure, which varies with altitude.
             // To remove the effects of altitude, use the sealevel function and your current altitude.
             // This number is commonly used in weather reports.
             // Parameters: PressureBMP = absolute pressure in mb, ALTITUDE = current altitude in m.
             // Result: seaLevelPressure = sea-level compensated pressure in mb
 
-            double seaLevelPressure = pressure.sealevel(PressureBMP,ALTITUDE); 
+            double seaLevelPressure = bmp.sealevel(PressureBMP,ALTITUDE);
             BMPseaLevelPressureSensor.value  = seaLevelPressure; 
             BMPseaLevelPressureSensor.current = true;
             BMPseaLevelPressureSensor.invalidReadsCntr = 0;
@@ -715,14 +692,6 @@ void readSensors(){
             if ( BMPseaLevelPressureSensor.invalidReadsCntr > 3)  BMPseaLevelPressureSensor.online = false;
             BMPtemperatureSensor.current = false;
           }
-        }
-        else {
-          Serial.println("error starting pressure measurement");
-          BMPseaLevelPressureSensor.current = false;
-          BMPseaLevelPressureSensor.invalidReadsCntr =  BMPseaLevelPressureSensor.invalidReadsCntr + 1;
-          if ( BMPseaLevelPressureSensor.invalidReadsCntr > 3)  BMPseaLevelPressureSensor.online = false;
-          BMPtemperatureSensor.current = false;
-        }
       }
       else {
         Serial.println("error retrieving BMP temperature measurement");
@@ -735,7 +704,7 @@ void readSensors(){
       }
     }
     else {
-      Serial.println("error starting BMP temperature measurement");
+      Serial.println("error starting BMP measurement");
       BMPseaLevelPressureSensor.current = false;
       BMPseaLevelPressureSensor.invalidReadsCntr =  BMPseaLevelPressureSensor.invalidReadsCntr + 1;
       if ( BMPseaLevelPressureSensor.invalidReadsCntr > 3)  BMPseaLevelPressureSensor.online = false;
